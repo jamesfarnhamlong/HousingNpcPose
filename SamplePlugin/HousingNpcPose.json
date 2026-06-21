@@ -1,0 +1,14 @@
+{
+  "Author": "Zana Remina",
+  "Name": "Housing NPC Pose",
+  "Punchline": "Client-side housing NPC pose automation.",
+  "Description": "v0.3.2 stable checkpoint. Lists visible housing NPC/object candidates, blocks known non-humanoid creature NPCs, applies confirmed useful local pose values, saves local pose assignments for matching NPCs in the current area, and optionally auto-applies them after zoning/plugin load. Client-side only: no packets, spawning, movement, hooks, or effects on other clients.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "housing",
+    "npc",
+    "pose",
+    "automation",
+    "local"
+  ]
+}
