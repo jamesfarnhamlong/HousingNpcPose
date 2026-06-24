@@ -14,6 +14,7 @@ public sealed class MainWindow : Window, IDisposable
     private readonly Plugin plugin;
     private ushort labObjectIndex;
     private int labParam = 1;
+    private float labOffsetY = 0.0f;
     private byte labLastPoseParam = 1;
     private string labLastPoseLabel = "Sit / ground sit";
     private string labTargetName = "<none>";
@@ -21,7 +22,7 @@ public sealed class MainWindow : Window, IDisposable
     private string labTargetPosition = "-";
 
     public MainWindow(Plugin plugin)
-        : base("Housing NPC Pose v0.3.2###HousingNpcPoseMain")
+        : base("Housing NPC Pose v0.3.4###HousingNpcPoseMain")
     {
         SizeConstraints = new WindowSizeConstraints
         {
@@ -38,8 +39,8 @@ public sealed class MainWindow : Window, IDisposable
 
     public override void Draw()
     {
-        ImGui.TextUnformatted("Housing NPC Pose v0.3.2 — stable saved local pose automation");
-        ImGui.TextWrapped("This stable checkpoint reads the local object table, blocks known non-humanoid / creature NPCs, applies confirmed local pose params, and can save/reapply poses for matching NPCs in the same area. It does not move NPCs, spawn anything, hook anything, send packets, or affect other clients.");
+        ImGui.TextUnformatted("Housing NPC Pose v0.3.4 — saved poses + wider Y offset + nameplate hiding");
+        ImGui.TextWrapped("This build reads the local object table, blocks known non-humanoid / creature NPCs, applies confirmed local pose params, saves/reapplies poses plus local visual Y offsets, and can hide nameplates for posed/saved NPCs. It does not server-move NPCs, spawn anything, hook anything, send packets, or affect other clients.");
 
         ImGui.Spacing();
 
@@ -108,7 +109,7 @@ public sealed class MainWindow : Window, IDisposable
         var totalSaved = plugin.Configuration.SavedPoses.Count;
         var currentAreaSaved = plugin.Configuration.SavedPoses.Count(entry => entry.TerritoryType == currentTerritory);
 
-        ImGui.TextUnformatted($"Automation: {(plugin.Configuration.AutoApplySavedPoses ? "ON" : "OFF")} | Saved in this area: {currentAreaSaved} | Total saved: {totalSaved}");
+        ImGui.TextUnformatted($"Automation: {(plugin.Configuration.AutoApplySavedPoses ? "ON" : "OFF")} | Nameplates: {(plugin.Configuration.HideNameplatesForPosedNpcs ? "hidden for posed/saved" : "normal")} | Saved in this area: {currentAreaSaved} | Total saved: {totalSaved}");
 
         var autoApply = plugin.Configuration.AutoApplySavedPoses;
         if (ImGui.Checkbox("Auto-apply saved poses", ref autoApply))
@@ -120,6 +121,10 @@ public sealed class MainWindow : Window, IDisposable
         }
 
         ImGui.SameLine();
+
+        var hideNameplates = plugin.Configuration.HideNameplatesForPosedNpcs;
+        if (ImGui.Checkbox("Hide nameplates for posed/saved NPCs", ref hideNameplates))
+            plugin.SetHideNameplatesForPosedNpcs(hideNameplates);
 
         if (ImGui.SmallButton("Apply saved now"))
             plugin.ApplySavedPosesNow();
@@ -155,7 +160,7 @@ public sealed class MainWindow : Window, IDisposable
             ImGuiTableFlags.Resizable |
             ImGuiTableFlags.SizingFixedFit;
 
-        if (!ImGui.BeginTable("HousingNpcPoseSavedPoseTable", 7, tableFlags))
+        if (!ImGui.BeginTable("HousingNpcPoseSavedPoseTable", 8, tableFlags))
             return;
 
         ImGui.TableSetupColumn("Area");
@@ -163,6 +168,7 @@ public sealed class MainWindow : Window, IDisposable
         ImGui.TableSetupColumn("Pose");
         ImGui.TableSetupColumn("BaseId");
         ImGui.TableSetupColumn("Position");
+        ImGui.TableSetupColumn("Y Offset");
         ImGui.TableSetupColumn("Enabled");
         ImGui.TableSetupColumn("Scope");
         ImGui.TableHeadersRow();
@@ -175,6 +181,7 @@ public sealed class MainWindow : Window, IDisposable
             TableText($"{entry.PoseLabel} ({entry.PoseParam})");
             TableText(entry.BaseId.ToString());
             TableText($"{entry.PositionX:0.00}, {entry.PositionY:0.00}, {entry.PositionZ:0.00}");
+            TableText(entry.OffsetY.ToString("+0.00;-0.00;0.00"));
             TableText(entry.Enabled ? "Yes" : "No");
             TableText(entry.TerritoryType == currentTerritory ? "Current area" : "Other area");
         }
@@ -234,7 +241,7 @@ public sealed class MainWindow : Window, IDisposable
 
         ImGui.TextWrapped("Click Set Target beside a safe EventNpc row, apply or choose a pose, then save it. Saved entries are matched by area + NPC name + BaseId + approximate position, not by volatile ObjectIndex.");
         ImGui.TextUnformatted($"Lab target: {labTargetName} | current idx {labObjectIndex} | BaseId {labTargetBaseId} | Pos {labTargetPosition}");
-        ImGui.TextUnformatted($"Selected pose to save: {labLastPoseLabel} ({labLastPoseParam})");
+        ImGui.TextUnformatted($"Selected pose to save: {labLastPoseLabel} ({labLastPoseParam}) | Y offset {labOffsetY:+0.00;-0.00;0.00}");
 
         var labIndexAsInt = (int)labObjectIndex;
         if (ImGui.InputInt("Object index", ref labIndexAsInt))
@@ -263,6 +270,72 @@ public sealed class MainWindow : Window, IDisposable
         if (ImGui.InputInt("Param ID", ref labParam))
             labParam = Math.Clamp(labParam, 0, 255);
 
+        if (ImGui.InputFloat("Y draw offset", ref labOffsetY, 0.01f, 0.10f, "%+.2f"))
+            labOffsetY = Math.Clamp(labOffsetY, Plugin.MinLocalYOffset, Plugin.MaxLocalYOffset);
+
+        if (ImGui.SmallButton("Y -0.05"))
+            labOffsetY = Math.Clamp(labOffsetY - 0.05f, Plugin.MinLocalYOffset, Plugin.MaxLocalYOffset);
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Y -0.01"))
+            labOffsetY = Math.Clamp(labOffsetY - 0.01f, Plugin.MinLocalYOffset, Plugin.MaxLocalYOffset);
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Y +0.01"))
+            labOffsetY = Math.Clamp(labOffsetY + 0.01f, Plugin.MinLocalYOffset, Plugin.MaxLocalYOffset);
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Y +0.05"))
+            labOffsetY = Math.Clamp(labOffsetY + 0.05f, Plugin.MinLocalYOffset, Plugin.MaxLocalYOffset);
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Y -0.25"))
+            labOffsetY = Math.Clamp(labOffsetY - 0.25f, Plugin.MinLocalYOffset, Plugin.MaxLocalYOffset);
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Y +0.25"))
+            labOffsetY = Math.Clamp(labOffsetY + 0.25f, Plugin.MinLocalYOffset, Plugin.MaxLocalYOffset);
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Apply Y offset"))
+            plugin.ApplyYOffsetByIndex(labObjectIndex, labOffsetY, "pose lab");
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Apply + save Y"))
+        {
+            if (plugin.ApplyYOffsetByIndex(labObjectIndex, labOffsetY, "pose lab"))
+                plugin.SaveYOffsetForObjectIndex(labObjectIndex, labOffsetY);
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Save Y only"))
+            plugin.SaveYOffsetForObjectIndex(labObjectIndex, labOffsetY);
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Reset Y"))
+        {
+            labOffsetY = 0.0f;
+            plugin.ApplyYOffsetByIndex(labObjectIndex, 0.0f, "pose lab");
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.SmallButton("Reset + save Y"))
+        {
+            labOffsetY = 0.0f;
+            if (plugin.ApplyYOffsetByIndex(labObjectIndex, 0.0f, "pose lab"))
+                plugin.SaveYOffsetForObjectIndex(labObjectIndex, 0.0f);
+        }
+
         if (ImGui.Button("Apply custom Param ID"))
         {
             labLastPoseParam = (byte)labParam;
@@ -282,8 +355,8 @@ public sealed class MainWindow : Window, IDisposable
 
         ImGui.SameLine();
 
-        if (ImGui.Button("Save selected pose for target"))
-            plugin.SavePoseForObjectIndex(labObjectIndex, labLastPoseLabel, labLastPoseParam);
+        if (ImGui.Button("Save selected pose + Y for target"))
+            plugin.SavePoseForObjectIndex(labObjectIndex, labLastPoseLabel, labLastPoseParam, labOffsetY);
 
         ImGui.SameLine();
 
@@ -353,6 +426,14 @@ public sealed class MainWindow : Window, IDisposable
         labTargetName = string.IsNullOrWhiteSpace(result.Name) ? "<no name>" : result.Name;
         labTargetBaseId = result.BaseId;
         labTargetPosition = result.PositionText;
+
+        var saved = plugin.FindSavedPoseForScanResult(result);
+        if (saved != null)
+        {
+            labLastPoseParam = saved.PoseParam;
+            labLastPoseLabel = saved.PoseLabel;
+            labOffsetY = saved.OffsetY;
+        }
     }
 
     private void DrawResultsTable(IReadOnlyList<NpcScanResult> results)

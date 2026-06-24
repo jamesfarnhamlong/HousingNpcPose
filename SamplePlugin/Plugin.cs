@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Game.Gui.NamePlate;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Game.Command;
 using Dalamud.IoC;
@@ -10,6 +11,7 @@ using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using ClientGameObject = FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject;
 using HousingNpcPose.Windows;
 using Lumina.Excel.Sheets;
 
@@ -18,6 +20,8 @@ namespace HousingNpcPose;
 public sealed unsafe class Plugin : IDalamudPlugin
 {
     private const string CommandName = "/hnpcpose";
+    public const float MinLocalYOffset = -10.0f;
+    public const float MaxLocalYOffset = 10.0f;
 
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
@@ -25,6 +29,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
+    [PluginService] internal static INamePlateGui NamePlateGui { get; private set; } = null!;
     [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
 
@@ -37,6 +42,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
     private readonly Dictionary<ulong, ActorModeSnapshot> actorModeSnapshots = new();
     private readonly Dictionary<ulong, AppliedPoseRecord> appliedPoseRecords = new();
+    private readonly Dictionary<ulong, float> appliedYOffsetRecords = new();
 
     private DateTime autoApplyUntilUtc = DateTime.MinValue;
     private DateTime nextAutoApplyAttemptUtc = DateTime.MinValue;
@@ -71,10 +77,11 @@ public sealed unsafe class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
         ClientState.TerritoryChanged += OnTerritoryChanged;
         Framework.Update += OnFrameworkUpdate;
+        NamePlateGui.OnNamePlateUpdate += OnNamePlateUpdate;
 
         ScheduleAutoApply("plugin load");
 
-        Log.Information("HousingNpcPose loaded. v0.3.2 stable saved pose automation + useful named poses with blocked non-humanoid NPC safety filter.");
+        Log.Information("HousingNpcPose loaded. v0.3.4 offset range + nameplate hiding test.");
     }
 
     public void Dispose()
@@ -83,6 +90,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
         RestoreAllActorModes(printResult: false);
 
         Framework.Update -= OnFrameworkUpdate;
+        NamePlateGui.OnNamePlateUpdate -= OnNamePlateUpdate;
         ClientState.TerritoryChanged -= OnTerritoryChanged;
 
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
@@ -228,8 +236,24 @@ public sealed unsafe class Plugin : IDalamudPlugin
                 ApplySavedPosesNow();
                 break;
 
+            case "offset":
+            case "yoffset":
+                ApplyYOffsetFromCommand(parts);
+                break;
+
+            case "saveoffset":
+            case "savey":
+            case "saveyoffset":
+                SaveYOffsetFromCommand(parts);
+                break;
+
             case "auto":
                 SetAutoApplyFromCommand(parts);
+                break;
+
+            case "nameplates":
+            case "nameplate":
+                SetNameplatesFromCommand(parts);
                 break;
 
             case "save":
@@ -286,15 +310,14 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
                 var note = ClassifyObject(obj);
                 var canPose = IsPoseableCandidate(obj);
-                appliedPoseRecords.TryGetValue(obj.GameObjectId, out var appliedPose);
                 var savedPose = FindSavedPoseForGameObject(obj);
 
                 results.Add(NpcScanResult.FromGameObject(
                     obj,
                     note,
                     canPose,
-                    actorModeSnapshots.ContainsKey(obj.GameObjectId),
-                    appliedPose?.DisplayText ?? "-",
+                    actorModeSnapshots.ContainsKey(obj.GameObjectId) || appliedYOffsetRecords.ContainsKey(obj.GameObjectId),
+                    GetPluginPoseDisplay(obj.GameObjectId),
                     savedPose?.DisplayText ?? "-"));
             }
             catch (Exception ex)
@@ -311,7 +334,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
         LastScanTime = DateTime.Now;
 
         ChatGui.Print(
-            $"Scanned {ScanResults.Count} object(s) in {GetTerritoryLabel()}. v0.3.2 stable saved pose automation + useful named poses with non-humanoid safety filter.",
+            $"Scanned {ScanResults.Count} object(s) in {GetTerritoryLabel()}. v0.3.4 offset range + nameplate hiding test",
             "HNpcPose");
     }
 
@@ -319,6 +342,19 @@ public sealed unsafe class Plugin : IDalamudPlugin
     {
         ScanResults = Array.Empty<NpcScanResult>();
         LastScanTime = null;
+    }
+
+    private string GetPluginPoseDisplay(ulong gameObjectId)
+    {
+        var parts = new List<string>();
+
+        if (appliedPoseRecords.TryGetValue(gameObjectId, out var appliedPose))
+            parts.Add(appliedPose.DisplayText);
+
+        if (appliedYOffsetRecords.TryGetValue(gameObjectId, out var offsetY) && Math.Abs(offsetY) > 0.001f)
+            parts.Add($"Y{offsetY:+0.00;-0.00;0.00}");
+
+        return parts.Count == 0 ? "-" : string.Join(" | ", parts);
     }
 
     public bool ApplyDefaultTestPose(ushort objectIndex)
@@ -376,6 +412,51 @@ public sealed unsafe class Plugin : IDalamudPlugin
         return ApplyActorMode(objectIndex, CharacterModes.Normal, 0, "Normal", "pose lab");
     }
 
+    public bool ApplyYOffsetByIndex(ushort objectIndex, float offsetY, string source = "Y offset")
+    {
+        var obj = ObjectTable[objectIndex];
+        if (obj == null || !obj.IsValid())
+        {
+            ChatGui.PrintError($"No valid object found at index {objectIndex}.", "HNpcPose");
+            return false;
+        }
+
+        return ApplyYOffsetToObject(obj, offsetY, source, printResult: true, rescan: true);
+    }
+
+    public bool SaveYOffsetForObjectIndex(ushort objectIndex, float offsetY)
+    {
+        var obj = ObjectTable[objectIndex];
+        if (obj == null || !obj.IsValid())
+        {
+            ChatGui.PrintError($"No valid object found at index {objectIndex}.", "HNpcPose");
+            return false;
+        }
+
+        if (!IsPoseableCandidate(obj))
+        {
+            ChatGui.PrintError($"Refusing to save Y offset for {GetObjectLabel(obj)} because it is not a safe pose candidate.", "HNpcPose");
+            return false;
+        }
+
+        var saved = FindSavedPoseForGameObject(obj);
+        if (saved == null)
+        {
+            ChatGui.PrintError($"No saved pose found for {GetObjectLabel(obj)}. Save a pose first, then save/apply the Y offset.", "HNpcPose");
+            return false;
+        }
+
+        saved.OffsetY = ClampYOffset(offsetY);
+        Configuration.Save();
+
+        var offsetText = Math.Abs(saved.OffsetY) > 0.001f ? saved.OffsetY.ToString("+0.00;-0.00;0.00", CultureInfo.InvariantCulture) : "0.00";
+        ChatGui.Print($"Saved Y offset {offsetText} for {GetObjectLabel(obj)}. Saved pose is now {saved.DisplayText}.", "HNpcPose");
+        if (Configuration.HideNameplatesForPosedNpcs)
+            NamePlateGui.RequestRedraw();
+        ScanObjects();
+        return true;
+    }
+
     public bool RestoreActorModeByIndex(ushort objectIndex, bool printResult = true)
     {
         var obj = ObjectTable[objectIndex];
@@ -386,37 +467,56 @@ public sealed unsafe class Plugin : IDalamudPlugin
             return false;
         }
 
-        if (!actorModeSnapshots.TryGetValue(obj.GameObjectId, out var snapshot))
+        var restoredAny = false;
+
+        if (actorModeSnapshots.TryGetValue(obj.GameObjectId, out var snapshot))
+            restoredAny |= RestoreActorMode(obj, snapshot, printResult);
+
+        if (appliedYOffsetRecords.ContainsKey(obj.GameObjectId))
+            restoredAny |= RestoreYOffset(obj, printResult);
+
+        if (!restoredAny)
         {
             if (printResult)
-                ChatGui.PrintError($"No saved original mode for {GetObjectLabel(obj)}. Use /hnpcpose normal {objectIndex} as a manual fallback if needed.", "HNpcPose");
+                ChatGui.PrintError($"No saved original mode or local Y offset for {GetObjectLabel(obj)}. Use /hnpcpose normal {objectIndex} as a manual fallback if needed.", "HNpcPose");
             return false;
         }
 
-        var restored = RestoreActorMode(obj, snapshot, printResult);
-        if (restored)
+        if (printResult)
             ScanObjects();
-        return restored;
+        return true;
     }
 
     public int RestoreAllActorModes(bool printResult = true)
     {
-        var snapshots = actorModeSnapshots.Values.ToArray();
+        var trackedIds = actorModeSnapshots.Keys
+            .Concat(appliedYOffsetRecords.Keys)
+            .Distinct()
+            .ToArray();
+
         var restored = 0;
 
-        foreach (var snapshot in snapshots)
+        foreach (var gameObjectId in trackedIds)
         {
-            var obj = ObjectTable.SearchById(snapshot.GameObjectId);
+            var obj = ObjectTable.SearchById(gameObjectId);
             if (obj == null || !obj.IsValid())
                 continue;
 
-            if (RestoreActorMode(obj, snapshot, printResult: false))
+            var restoredThisObject = false;
+
+            if (actorModeSnapshots.TryGetValue(gameObjectId, out var snapshot))
+                restoredThisObject |= RestoreActorMode(obj, snapshot, printResult: false);
+
+            if (appliedYOffsetRecords.ContainsKey(gameObjectId))
+                restoredThisObject |= RestoreYOffset(obj, printResult: false);
+
+            if (restoredThisObject)
                 restored++;
         }
 
         if (printResult)
         {
-            ChatGui.Print($"Restored {restored} actor mode snapshot(s).", "HNpcPose");
+            ChatGui.Print($"Restored {restored} actor local pose/offset target(s).", "HNpcPose");
             ScanObjects();
         }
 
@@ -432,6 +532,63 @@ public sealed unsafe class Plugin : IDalamudPlugin
         autoApplyUntilUtc = now.AddSeconds(Math.Clamp(Configuration.AutoApplyRetrySeconds, 1, 60));
         nextAutoApplyAttemptUtc = now.AddMilliseconds(750);
         Log.Debug($"Scheduled saved-pose auto-apply for {Configuration.AutoApplyRetrySeconds}s because {reason}.");
+    }
+
+    private void OnNamePlateUpdate(INamePlateUpdateContext context, IReadOnlyList<INamePlateUpdateHandler> handlers)
+    {
+        if (!Configuration.HideNameplatesForPosedNpcs)
+            return;
+
+        foreach (var handler in handlers)
+        {
+            try
+            {
+                var obj = handler.GameObject;
+                if (obj == null || !obj.IsValid())
+                    continue;
+
+                if (!ShouldHideNamePlateForObject(obj))
+                    continue;
+
+                // Remove only the nameplate text/icons for NPCs this plugin is actively managing or has saved for this room.
+                // The handler is frame-scoped; do not store it.
+                handler.RemoveName();
+                handler.DisplayTitle = false;
+                handler.NameIconId = -1;
+                handler.MarkerIconId = 0;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug($"Failed while trying to hide a posed NPC nameplate: {ex.Message}");
+            }
+        }
+    }
+
+    private bool ShouldHideNamePlateForObject(IGameObject obj)
+    {
+        if (!Configuration.HideNameplatesForPosedNpcs || !IsPoseableCandidate(obj))
+            return false;
+
+        if (appliedPoseRecords.ContainsKey(obj.GameObjectId) || appliedYOffsetRecords.ContainsKey(obj.GameObjectId))
+            return true;
+
+        var saved = FindSavedPoseForGameObject(obj);
+        return saved != null && saved.Enabled;
+    }
+
+    public void SetHideNameplatesForPosedNpcs(bool enabled)
+    {
+        Configuration.HideNameplatesForPosedNpcs = enabled;
+        Configuration.Save();
+
+        try
+        {
+            NamePlateGui.RequestRedraw();
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"Failed to request nameplate redraw: {ex.Message}");
+        }
     }
 
     private void OnTerritoryChanged(uint territoryType)
@@ -483,7 +640,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
             if (saved == null || !saved.Enabled)
                 continue;
 
-            if (ApplyActorModeToObject(obj, CharacterModes.InPositionLoop, saved.PoseParam, saved.PoseLabel, "saved auto-apply", printResult: false, rescan: false))
+            if (ApplySavedPoseToObject(obj, saved, "saved auto-apply", printResult: false, rescan: false))
                 applied++;
         }
 
@@ -493,7 +650,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
         return applied;
     }
 
-    public bool SavePoseForObjectIndex(ushort objectIndex, string poseLabel, byte poseParam)
+    public bool SavePoseForObjectIndex(ushort objectIndex, string poseLabel, byte poseParam, float offsetY = 0.0f)
     {
         var obj = ObjectTable[objectIndex];
         if (obj == null || !obj.IsValid())
@@ -521,6 +678,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
             PositionZ = position.Z,
             PoseLabel = string.IsNullOrWhiteSpace(poseLabel) ? $"Custom Pos {poseParam}" : poseLabel,
             PoseParam = poseParam,
+            OffsetY = ClampYOffset(offsetY),
         };
 
         RemoveSavedPoseForObject(obj, saveAfterRemove: false);
@@ -528,6 +686,8 @@ public sealed unsafe class Plugin : IDalamudPlugin
         Configuration.Save();
 
         ChatGui.Print($"Saved {entry.DisplayText} for {GetObjectLabel(obj)} in {entry.TerritoryLabel}.", "HNpcPose");
+        if (Configuration.HideNameplatesForPosedNpcs)
+            NamePlateGui.RequestRedraw();
         ScanObjects();
         return true;
     }
@@ -554,7 +714,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
             return false;
         }
 
-        return ApplyActorModeToObject(obj, CharacterModes.InPositionLoop, saved.PoseParam, saved.PoseLabel, "saved target", printResult: true, rescan: true);
+        return ApplySavedPoseToObject(obj, saved, "saved target", printResult: true, rescan: true);
     }
 
     public bool ClearSavedPoseForObjectIndex(ushort objectIndex)
@@ -567,6 +727,8 @@ public sealed unsafe class Plugin : IDalamudPlugin
         }
 
         var removed = RemoveSavedPoseForObject(obj, saveAfterRemove: true);
+        if (removed > 0 && Configuration.HideNameplatesForPosedNpcs)
+            NamePlateGui.RequestRedraw();
         ChatGui.Print(removed > 0
             ? $"Cleared {removed} saved pose entry/entries for {GetObjectLabel(obj)}."
             : $"No saved pose found for {GetObjectLabel(obj)}.", "HNpcPose");
@@ -579,6 +741,8 @@ public sealed unsafe class Plugin : IDalamudPlugin
         var territory = ClientState.TerritoryType;
         var removed = Configuration.SavedPoses.RemoveAll(entry => entry.TerritoryType == territory);
         Configuration.Save();
+        if (removed > 0 && Configuration.HideNameplatesForPosedNpcs)
+            NamePlateGui.RequestRedraw();
         ChatGui.Print($"Cleared {removed} saved pose entry/entries for {GetTerritoryLabel()}.", "HNpcPose");
         ScanObjects();
     }
@@ -877,6 +1041,74 @@ public sealed unsafe class Plugin : IDalamudPlugin
         RestoreActorModeByIndex(objectIndex);
     }
 
+    private void ApplyYOffsetFromCommand(IReadOnlyList<string> parts)
+    {
+        if (parts.Count < 3)
+        {
+            ChatGui.PrintError("Usage: /hnpcpose offset <idx> <y>", "HNpcPose");
+            return;
+        }
+
+        if (!ushort.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var objectIndex))
+        {
+            ChatGui.PrintError($"Invalid object index '{parts[1]}'.", "HNpcPose");
+            return;
+        }
+
+        if (!float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var offsetY))
+        {
+            ChatGui.PrintError($"Invalid Y offset '{parts[2]}'. Expected a number like 0.25 or -0.10.", "HNpcPose");
+            return;
+        }
+
+        ApplyYOffsetByIndex(objectIndex, offsetY, "command");
+    }
+
+    private void SaveYOffsetFromCommand(IReadOnlyList<string> parts)
+    {
+        if (parts.Count < 3)
+        {
+            ChatGui.PrintError("Usage: /hnpcpose saveoffset <idx> <y>", "HNpcPose");
+            return;
+        }
+
+        if (!ushort.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var objectIndex))
+        {
+            ChatGui.PrintError($"Invalid object index '{parts[1]}'.", "HNpcPose");
+            return;
+        }
+
+        if (!float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var offsetY))
+        {
+            ChatGui.PrintError($"Invalid Y offset '{parts[2]}'. Expected a number like 0.25 or -0.10.", "HNpcPose");
+            return;
+        }
+
+        SaveYOffsetForObjectIndex(objectIndex, offsetY);
+    }
+
+    private void SetNameplatesFromCommand(IReadOnlyList<string> parts)
+    {
+        if (parts.Count < 2)
+        {
+            ChatGui.Print($"Hide nameplates for posed/saved NPCs is currently {(Configuration.HideNameplatesForPosedNpcs ? "ON" : "OFF")}. Use /hnpcpose nameplates on|off.", "HNpcPose");
+            return;
+        }
+
+        var value = parts[1].ToLowerInvariant();
+        if (value is "on" or "enable" or "enabled" or "true" or "1")
+            SetHideNameplatesForPosedNpcs(true);
+        else if (value is "off" or "disable" or "disabled" or "false" or "0")
+            SetHideNameplatesForPosedNpcs(false);
+        else
+        {
+            ChatGui.PrintError("Usage: /hnpcpose nameplates on|off", "HNpcPose");
+            return;
+        }
+
+        ChatGui.Print($"Hide nameplates for posed/saved NPCs is now {(Configuration.HideNameplatesForPosedNpcs ? "ON" : "OFF")}.", "HNpcPose");
+    }
+
     private void SetAutoApplyFromCommand(IReadOnlyList<string> parts)
     {
         if (parts.Count < 2)
@@ -906,7 +1138,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
     {
         if (parts.Count < 3)
         {
-            ChatGui.PrintError("Usage: /hnpcpose save <idx> <poseName|param>", "HNpcPose");
+            ChatGui.PrintError("Usage: /hnpcpose save <idx> <poseName|param> [yOffset]", "HNpcPose");
             return;
         }
 
@@ -916,9 +1148,16 @@ public sealed unsafe class Plugin : IDalamudPlugin
             return;
         }
 
+        var offsetY = 0.0f;
+        if (parts.Count >= 4 && !float.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out offsetY))
+        {
+            ChatGui.PrintError($"Invalid Y offset '{parts[3]}'. Expected a number like 0.25 or -0.10.", "HNpcPose");
+            return;
+        }
+
         if (byte.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var customParam))
         {
-            SavePoseForObjectIndex(objectIndex, GetInPositionLabel(customParam), customParam);
+            SavePoseForObjectIndex(objectIndex, GetInPositionLabel(customParam), customParam, offsetY);
             return;
         }
 
@@ -928,7 +1167,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
             return;
         }
 
-        SavePoseForObjectIndex(objectIndex, label, param);
+        SavePoseForObjectIndex(objectIndex, label, param, offsetY);
     }
 
     private void ClearSavedFromCommand(IReadOnlyList<string> parts)
@@ -985,6 +1224,129 @@ public sealed unsafe class Plugin : IDalamudPlugin
         return ApplyActorModeToObject(obj, mode, modeParam, poseLabel, source, printResult: true, rescan: true);
     }
 
+    private bool ApplySavedPoseToObject(IGameObject obj, SavedPoseEntry saved, string source, bool printResult, bool rescan)
+    {
+        var appliedPose = ApplyActorModeToObject(obj, CharacterModes.InPositionLoop, saved.PoseParam, saved.PoseLabel, source, printResult: false, rescan: false);
+        if (!appliedPose)
+            return false;
+
+        if (Math.Abs(saved.OffsetY) > 0.001f)
+            ApplyYOffsetToObject(obj, saved.OffsetY, source, printResult: false, rescan: false);
+        else if (appliedYOffsetRecords.ContainsKey(obj.GameObjectId))
+            RestoreYOffset(obj, printResult: false);
+
+        if (printResult)
+        {
+            var offsetText = Math.Abs(saved.OffsetY) > 0.001f ? $" with Y offset {saved.OffsetY:+0.00;-0.00;0.00}" : string.Empty;
+            ChatGui.Print($"Applied saved {saved.PoseLabel} ({saved.PoseParam}){offsetText} to {GetObjectLabel(obj)} via {source}.", "HNpcPose");
+        }
+
+        if (rescan)
+            ScanObjects();
+
+        return true;
+    }
+
+    private bool ApplyYOffsetToObject(IGameObject obj, float offsetY, string source, bool printResult, bool rescan)
+    {
+        if (obj.ObjectKind != ObjectKind.EventNpc)
+        {
+            if (printResult)
+                ChatGui.PrintError($"Refusing to offset {GetObjectLabel(obj)} because it is {obj.ObjectKind}, not EventNpc.", "HNpcPose");
+            return false;
+        }
+
+        if (TryGetPoseBlockReason(obj, out var blockReason))
+        {
+            if (printResult)
+                ChatGui.PrintError($"Refusing to offset {GetObjectLabel(obj)}. {blockReason}.", "HNpcPose");
+            return false;
+        }
+
+        if (obj.Address == nint.Zero)
+        {
+            if (printResult)
+                ChatGui.PrintError($"Refusing to offset {GetObjectLabel(obj)} because its address is null.", "HNpcPose");
+            return false;
+        }
+
+        try
+        {
+            var clampedOffsetY = ClampYOffset(offsetY);
+            var gameObject = (ClientGameObject*)obj.Address;
+            if (gameObject == null)
+            {
+                if (printResult)
+                    ChatGui.PrintError($"Refusing to offset {GetObjectLabel(obj)} because GameObject* was null.", "HNpcPose");
+                return false;
+            }
+
+            gameObject->SetDrawOffset(0.0f, clampedOffsetY, 0.0f);
+
+            if (Math.Abs(clampedOffsetY) > 0.001f)
+                appliedYOffsetRecords[obj.GameObjectId] = clampedOffsetY;
+            else
+                appliedYOffsetRecords.Remove(obj.GameObjectId);
+
+            if (printResult)
+                ChatGui.Print($"Applied local visual Y offset {clampedOffsetY:+0.00;-0.00;0.00} to {GetObjectLabel(obj)} via {source}. Use /hnpcpose restore {obj.ObjectIndex} to reset.", "HNpcPose");
+
+            if (Configuration.HideNameplatesForPosedNpcs)
+                NamePlateGui.RequestRedraw();
+
+            if (rescan)
+                ScanObjects();
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, $"Failed to apply Y offset {offsetY} to object index {obj.ObjectIndex}.");
+            if (printResult)
+                ChatGui.PrintError($"Failed to apply Y offset to {GetObjectLabel(obj)}. Check /xllog.", "HNpcPose");
+            return false;
+        }
+    }
+
+    private bool RestoreYOffset(IGameObject obj, bool printResult)
+    {
+        if (obj.Address == nint.Zero)
+        {
+            if (printResult)
+                ChatGui.PrintError($"Could not reset Y offset for {GetObjectLabel(obj)}; current object address is null.", "HNpcPose");
+            return false;
+        }
+
+        try
+        {
+            var gameObject = (ClientGameObject*)obj.Address;
+            if (gameObject == null)
+                return false;
+
+            gameObject->SetDrawOffset(0.0f, 0.0f, 0.0f);
+            appliedYOffsetRecords.Remove(obj.GameObjectId);
+            if (Configuration.HideNameplatesForPosedNpcs)
+                NamePlateGui.RequestRedraw();
+
+            if (printResult)
+                ChatGui.Print($"Reset local visual Y offset for {GetObjectLabel(obj)}.", "HNpcPose");
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, $"Failed to reset Y offset for {GetObjectLabel(obj)}.");
+            if (printResult)
+                ChatGui.PrintError($"Failed to reset Y offset for {GetObjectLabel(obj)}. Check /xllog.", "HNpcPose");
+            return false;
+        }
+    }
+
+    private static float ClampYOffset(float offsetY)
+    {
+        return Math.Clamp(offsetY, MinLocalYOffset, MaxLocalYOffset);
+    }
+
     private bool ApplyActorModeToObject(IGameObject obj, CharacterModes mode, byte modeParam, string poseLabel, string source, bool printResult, bool rescan)
     {
         if (obj.ObjectKind != ObjectKind.EventNpc)
@@ -1034,6 +1396,9 @@ public sealed unsafe class Plugin : IDalamudPlugin
             if (printResult)
                 ChatGui.Print($"Applied local {poseLabel} ({mode} param {modeParam}) to {GetObjectLabel(obj)} via {source}. Use /hnpcpose restore {obj.ObjectIndex} to undo.", "HNpcPose");
 
+            if (Configuration.HideNameplatesForPosedNpcs)
+                NamePlateGui.RequestRedraw();
+
             if (rescan)
                 ScanObjects();
 
@@ -1066,6 +1431,8 @@ public sealed unsafe class Plugin : IDalamudPlugin
             character->SetMode(snapshot.Mode, snapshot.ModeParam);
             actorModeSnapshots.Remove(snapshot.GameObjectId);
             appliedPoseRecords.Remove(snapshot.GameObjectId);
+            if (Configuration.HideNameplatesForPosedNpcs)
+                NamePlateGui.RequestRedraw();
 
             if (printResult)
                 ChatGui.Print($"Restored {snapshot.Name} to {snapshot.Mode} param {snapshot.ModeParam}.", "HNpcPose");
@@ -1091,7 +1458,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
     private static void PrintHelp()
     {
-        ChatGui.Print("HousingNpcPose v0.3.2 commands:", "HNpcPose");
+        ChatGui.Print("HousingNpcPose v0.3.4 commands:", "HNpcPose");
         ChatGui.Print("/hnpcpose - open/close scanner window", "HNpcPose");
         ChatGui.Print("/hnpcpose scan - scan visible NPC candidates", "HNpcPose");
         ChatGui.Print("/hnpcpose clear - clear the current scan results", "HNpcPose");
@@ -1106,10 +1473,13 @@ public sealed unsafe class Plugin : IDalamudPlugin
         ChatGui.Print("/hnpcpose mode <idx> <pos|loop|normal> <param> - pose discovery command", "HNpcPose");
         ChatGui.Print("/hnpcpose normal <idx> - force CharacterModes.Normal param 0", "HNpcPose");
         ChatGui.Print("/hnpcpose restore <idx|all> - restore original mode snapshot(s)", "HNpcPose");
-        ChatGui.Print("/hnpcpose save <idx> <poseName|param> - save a local pose assignment for this NPC in this area", "HNpcPose");
+        ChatGui.Print("/hnpcpose save <idx> <poseName|param> [yOffset] - save a local pose and optional visual Y offset", "HNpcPose");
         ChatGui.Print("/hnpcpose clearsaved <idx|area> - clear saved pose assignment(s)", "HNpcPose");
         ChatGui.Print("/hnpcpose applysaved - apply saved poses for the current area now", "HNpcPose");
+        ChatGui.Print("/hnpcpose offset <idx> <y> - apply local visual Y draw offset to a safe NPC", "HNpcPose");
+        ChatGui.Print("/hnpcpose saveoffset <idx> <y> - save Y draw offset into an existing saved pose", "HNpcPose");
         ChatGui.Print("/hnpcpose auto on|off - toggle auto-apply saved poses after zoning/plugin load", "HNpcPose");
+        ChatGui.Print("/hnpcpose nameplates on|off - hide nameplates for posed/saved NPCs", "HNpcPose");
         ChatGui.Print("Only unblocked EventNpc targets are accepted. Known non-humanoid / creature NPCs are refused. This is local-client experimental mode only.", "HNpcPose");
     }
 }

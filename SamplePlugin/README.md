@@ -4,9 +4,9 @@ Client-side Dalamud plugin for applying local pose/emote-loop states to already-
 
 ## Current checkpoint
 
-**v0.3.2 stable checkpoint**
+**v0.3.4 offset range + nameplate hiding test build**
 
-Confirmed working:
+Confirmed working before this patch:
 
 - Scan visible local housing NPC/object candidates.
 - Pose safe humanoid `EventNpc` housing NPCs locally.
@@ -14,6 +14,14 @@ Confirmed working:
 - Save pose assignments matched by territory, NPC name, BaseId, and approximate position.
 - Manually apply saved poses.
 - Optionally auto-apply saved poses after entering/reloading the housing area.
+
+New in v0.3.4:
+
+- Wider local visual Y draw-offset range: -10.0 to +10.0.
+- Fine and medium Y offset adjustment buttons.
+- Optional nameplate hiding for posed/saved NPCs.
+- `/hnpcpose nameplates on|off` toggles nameplate hiding.
+- Nameplate hiding is limited to safe EventNpc targets currently controlled by the plugin or with enabled saved entries in the current room.
 
 Confirmed useful pose params:
 
@@ -37,13 +45,16 @@ It does **not**:
 
 - send packets,
 - spawn objects or actors,
-- move NPCs,
+- server-move NPCs,
 - affect other clients,
 - apply changes to other players,
 - hook game functions,
-- sync anything across clients.
+- sync anything across clients,
+- permanently change or delete NPC names.
 
 All effects are local visual state changes on existing housing NPC actors already loaded by the client.
+
+The Y offset feature uses the local draw offset and is intended for visual furniture alignment only. Nameplate hiding uses Dalamud nameplate update handlers and only removes the displayed nameplate text/icons locally.
 
 ## Commands
 
@@ -53,11 +64,14 @@ All effects are local visual state changes on existing housing NPC actors alread
 /hnpcpose config
 /hnpcpose pose <idx> <sit|bench|doze|lean|confirm|scheme|reprimand|sweat|shiver|normal>
 /hnpcpose pos <idx> <param>
+/hnpcpose offset <idx> <y>
+/hnpcpose saveoffset <idx> <y>
 /hnpcpose restore <idx|all>
-/hnpcpose save <idx> <poseName|param>
+/hnpcpose save <idx> <poseName|param> [yOffset]
 /hnpcpose clearsaved <idx|area>
 /hnpcpose applysaved
 /hnpcpose auto on|off
+/hnpcpose nameplates on|off
 ```
 
 ## Development notes

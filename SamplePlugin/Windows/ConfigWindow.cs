@@ -24,7 +24,7 @@ public sealed class ConfigWindow : Window, IDisposable
 
     public override void Draw()
     {
-        ImGui.TextWrapped("v0.3.2 stable checkpoint. Saved local pose assignments can be auto-applied after entering/reloading an area. Everything is client-side only.");
+        ImGui.TextWrapped("v0.3.4. Saved local pose assignments and optional visual Y offsets can be auto-applied after entering/reloading an area. Nameplate hiding can remove labels from posed/saved NPCs. Everything is client-side only.");
 
         ImGui.Spacing();
         ImGui.Text("Automation");
@@ -51,6 +51,16 @@ public sealed class ConfigWindow : Window, IDisposable
             configuration.SavedPosePositionTolerance = Math.Clamp(tolerance, 0.05f, 5.0f);
             configuration.Save();
         }
+
+        var hideNameplates = configuration.HideNameplatesForPosedNpcs;
+        if (ImGui.Checkbox("Hide nameplates for posed/saved NPCs", ref hideNameplates))
+        {
+            configuration.HideNameplatesForPosedNpcs = hideNameplates;
+            configuration.Save();
+            Plugin.NamePlateGui.RequestRedraw();
+        }
+
+        ImGui.TextWrapped($"Y offsets use the local draw offset only. They are visual/client-side and are reapplied with saved poses; they do not change server housing placement. Current allowed range: {Plugin.MinLocalYOffset:0.##} to +{Plugin.MaxLocalYOffset:0.##}.");
 
         ImGui.Spacing();
         ImGui.Text("Scanner visibility");

@@ -1,8 +1,8 @@
 {
-  "Author": "Zana Remina",
+  "Author": "James",
   "Name": "Housing NPC Pose",
-  "Punchline": "Client-side housing NPC pose automation.",
-  "Description": "v0.3.2 stable checkpoint. Lists visible housing NPC/object candidates, blocks known non-humanoid creature NPCs, applies confirmed useful local pose values, saves local pose assignments for matching NPCs in the current area, and optionally auto-applies them after zoning/plugin load. Client-side only: no packets, spawning, movement, hooks, or effects on other clients.",
+  "Punchline": "Client-side housing NPC pose automation with visual Y offsets and nameplate hiding.",
+  "Description": "v0.3.4 test build. Lists visible housing NPC/object candidates, blocks known non-humanoid creature NPCs, applies confirmed useful local pose values, saves local pose assignments plus optional visual Y offsets for matching NPCs in the current area, optionally auto-applies them after zoning/plugin load, and can hide nameplates for posed/saved NPCs. Client-side only: no packets, spawning, server-side movement, hooks, or effects on other clients.",
   "ApplicableVersion": "any",
   "Tags": [
     "housing",
