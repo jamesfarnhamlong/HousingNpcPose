@@ -69,7 +69,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Housing NPC Pose. Usage: /hnpcpose, /hnpcpose scan, /hnpcpose pose <idx> <name>, /hnpcpose save <idx> <poseName|param>, /hnpcpose applysaved, /hnpcpose auto on|off"
+            HelpMessage = "Housing NPC Pose. Usage: /hnpcpose, /hnpcpose scan, /hnpcpose pose <idx> <catalogueName>, /hnpcpose save <idx> <poseName|param>, /hnpcpose applysaved, /hnpcpose poses, /hnpcpose auto on|off"
         });
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
@@ -81,7 +81,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
         ScheduleAutoApply("plugin load");
 
-        Log.Information("HousingNpcPose loaded. v0.3.4 offset range + nameplate hiding test.");
+        Log.Information("HousingNpcPose loaded. v0.3.7 pose catalogue cleanup.");
     }
 
     public void Dispose()
@@ -266,6 +266,12 @@ public sealed unsafe class Plugin : IDalamudPlugin
                 ClearSavedFromCommand(parts);
                 break;
 
+            case "catalogue":
+            case "catalog":
+            case "poses":
+                PrintPoseCatalogue();
+                break;
+
             case "help":
                 PrintHelp();
                 break;
@@ -334,7 +340,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
         LastScanTime = DateTime.Now;
 
         ChatGui.Print(
-            $"Scanned {ScanResults.Count} object(s) in {GetTerritoryLabel()}. v0.3.4 offset range + nameplate hiding test",
+            $"Scanned {ScanResults.Count} object(s) in {GetTerritoryLabel()}. v0.3.7 pose catalogue cleanup",
             "HNpcPose");
     }
 
@@ -364,26 +370,16 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
     public bool TryGetNamedPoseParam(string poseName, out byte param, out string label)
     {
-        var key = NormalizePoseName(poseName);
-
-        switch (key)
+        if (PoseCatalogue.TryGetByAlias(poseName, out var definition))
         {
-            case "sit": param = 1; label = "Sit / ground sit"; return true;
-            case "bench": param = 2; label = "Chair / bench sit"; return true;
-            case "doze": param = 3; label = "Doze / bed lie"; return true;
-            case "stepdance": param = 4; label = "Stepdance"; return true;
-            case "harvestdance": param = 5; label = "Harvestdance"; return true;
-            case "balldance": param = 6; label = "Ball Dance"; return true;
-            case "manderville": param = 7; label = "Manderville Dance"; return true;
-            case "thavdance": param = 10; label = "Thavnairian Dance"; return true;
-            case "sweat": param = 42; label = "Sweat"; return true;
-            case "shiver": param = 43; label = "Shiver"; return true;
-            case "confirm": param = 47; label = "Confirm"; return true;
-            case "scheme": param = 48; label = "Scheme"; return true;
-            case "reprimand": param = 51; label = "Reprimand"; return true;
-            case "lean": param = 55; label = "Lean"; return true;
-            default: param = 0; label = string.Empty; return false;
+            param = definition.Param;
+            label = definition.DisplayName;
+            return true;
         }
+
+        param = 0;
+        label = string.Empty;
+        return false;
     }
 
     public bool ApplyNamedPose(ushort objectIndex, string poseName, string source = "named pose")
@@ -853,74 +849,23 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
     private static string NormalizePoseName(string poseName)
     {
-        return poseName.Trim().ToLowerInvariant().Replace("_", string.Empty).Replace("-", string.Empty).Replace(" ", string.Empty).Replace("/", string.Empty) switch
-        {
-            "sit" or "groundsit" => "sit",
-            "bench" or "chair" or "chairsit" or "sitbench" => "bench",
-            "doze" or "bed" or "lie" or "liedown" or "sleep" => "doze",
-            "stepdance" => "stepdance",
-            "harvestdance" => "harvestdance",
-            "balldance" or "ball" => "balldance",
-            "mandervilledance" or "manderville" => "manderville",
-            "thavnairiandance" or "thavdance" or "thavnairian" => "thavdance",
-            "sweat" => "sweat",
-            "shiver" => "shiver",
-            "confirm" => "confirm",
-            "scheme" => "scheme",
-            "reprimand" => "reprimand",
-            "lean" => "lean",
-            "normal" or "default" or "restorepose" => "normal",
-            var normalized => normalized
-        };
+        var normalized = PoseCatalogue.NormalizeAlias(poseName);
+        return normalized is "normal" or "default" or "restorepose" ? "normal" : normalized;
     }
 
     private static string GetInPositionLabel(byte param)
     {
-        return param switch
-        {
-            1 => "Pos 1: Sit / ground sit",
-            2 => "Pos 2: Chair / bench sit",
-            3 => "Pos 3: Doze / bed lie",
-            4 => "Pos 4: Stepdance",
-            5 => "Pos 5: Harvestdance",
-            6 => "Pos 6: Ball Dance",
-            7 => "Pos 7: Manderville Dance",
-            10 => "Pos 10: Thavnairian Dance",
-            42 => "Pos 42: Sweat",
-            43 => "Pos 43: Shiver",
-            47 => "Pos 47: Confirm",
-            48 => "Pos 48: Scheme",
-            51 => "Pos 51: Reprimand",
-            55 => "Pos 55: Lean",
-            _ => $"Pos {param}"
-        };
+        return PoseCatalogue.GetLabel(param, "Pos");
     }
 
     private static string GetLoopLabel(byte param)
     {
-        return param switch
-        {
-            1 => "Loop 1: Sit / ground sit",
-            2 => "Loop 2: Chair / bench sit",
-            3 => "Loop 3: Doze / bed lie",
-            4 => "Loop 4: Stepdance",
-            5 => "Loop 5: Harvestdance",
-            6 => "Loop 6: Ball Dance",
-            7 => "Loop 7: Manderville Dance",
-            10 => "Loop 10: Thavnairian Dance",
-            42 => "Loop 42: Sweat",
-            43 => "Loop 43: Shiver",
-            47 => "Loop 47: Confirm",
-            48 => "Loop 48: Scheme",
-            51 => "Loop 51: Reprimand",
-            55 => "Loop 55: Lean",
-            _ => $"Loop {param}"
-        };
+        return PoseCatalogue.GetLabel(param, "Loop");
     }
 
     private static bool RefuseUnknownNamedPose(string poseName)
     {
-        ChatGui.PrintError($"Unknown named pose '{poseName}'. Known: sit, bench, doze, lean, confirm, scheme, reprimand, sweat, shiver, stepdance, harvestdance, balldance, manderville, thavdance, normal.", "HNpcPose");
+        ChatGui.PrintError($"Unknown named pose '{poseName}'. Known catalogue entries: {PoseCatalogue.KnownCommandNames()}, normal. Custom numeric params are still available via /hnpcpose pos <idx> <param> or the Advanced lab.", "HNpcPose");
         return false;
     }
 
@@ -1157,7 +1102,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
         if (byte.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var customParam))
         {
-            SavePoseForObjectIndex(objectIndex, GetInPositionLabel(customParam), customParam, offsetY);
+            SavePoseForObjectIndex(objectIndex, PoseCatalogue.GetDisplayName(customParam), customParam, offsetY);
             return;
         }
 
@@ -1456,9 +1401,19 @@ public sealed unsafe class Plugin : IDalamudPlugin
             : $"{name} [{obj.ObjectIndex}]";
     }
 
+    private static void PrintPoseCatalogue()
+    {
+        var lines = PoseCatalogue.All
+            .OrderBy(definition => definition.Category)
+            .ThenBy(definition => definition.Param)
+            .Select(definition => $"{definition.Param}: {definition.DisplayName} [{definition.Category}; {definition.Safety}]");
+
+        ChatGui.Print("Known pose catalogue: " + string.Join(" | ", lines), "HNpcPose");
+    }
+
     private static void PrintHelp()
     {
-        ChatGui.Print("HousingNpcPose v0.3.4 commands:", "HNpcPose");
+        ChatGui.Print("HousingNpcPose v0.3.7 commands:", "HNpcPose");
         ChatGui.Print("/hnpcpose - open/close scanner window", "HNpcPose");
         ChatGui.Print("/hnpcpose scan - scan visible NPC candidates", "HNpcPose");
         ChatGui.Print("/hnpcpose clear - clear the current scan results", "HNpcPose");
@@ -1467,7 +1422,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
         ChatGui.Print("/hnpcpose test <idx> - alias for /hnpcpose sit <idx>", "HNpcPose");
         ChatGui.Print("/hnpcpose lean <idx> - apply confirmed Pos 55 Lean", "HNpcPose");
         ChatGui.Print("/hnpcpose confirm|scheme|reprimand|sweat|shiver <idx> - apply confirmed useful emote poses", "HNpcPose");
-        ChatGui.Print("/hnpcpose pose <idx> <sit|bench|doze|lean|confirm|scheme|reprimand|sweat|shiver|normal> - apply a confirmed named pose", "HNpcPose");
+        ChatGui.Print("/hnpcpose pose <idx> <catalogueName|normal> - apply a named catalogue pose", "HNpcPose");
         ChatGui.Print("/hnpcpose pos <idx> <param> - apply CharacterModes.InPositionLoop with param 0-255", "HNpcPose");
         ChatGui.Print("/hnpcpose loop <idx> <param> - apply CharacterModes.EmoteLoop with param 0-255", "HNpcPose");
         ChatGui.Print("/hnpcpose mode <idx> <pos|loop|normal> <param> - pose discovery command", "HNpcPose");
@@ -1475,6 +1430,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
         ChatGui.Print("/hnpcpose restore <idx|all> - restore original mode snapshot(s)", "HNpcPose");
         ChatGui.Print("/hnpcpose save <idx> <poseName|param> [yOffset] - save a local pose and optional visual Y offset", "HNpcPose");
         ChatGui.Print("/hnpcpose clearsaved <idx|area> - clear saved pose assignment(s)", "HNpcPose");
+        ChatGui.Print("/hnpcpose poses - print the current built-in pose catalogue", "HNpcPose");
         ChatGui.Print("/hnpcpose applysaved - apply saved poses for the current area now", "HNpcPose");
         ChatGui.Print("/hnpcpose offset <idx> <y> - apply local visual Y draw offset to a safe NPC", "HNpcPose");
         ChatGui.Print("/hnpcpose saveoffset <idx> <y> - save Y draw offset into an existing saved pose", "HNpcPose");

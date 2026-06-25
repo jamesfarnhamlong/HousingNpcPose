@@ -7,7 +7,7 @@ namespace HousingNpcPose;
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 6;
+    public int Version { get; set; } = 7;
 
     /// <summary>
     /// Discovery mode. When enabled, the scanner lists every non-player object rather than only likely NPC candidates.
@@ -93,7 +93,7 @@ public class SavedPoseEntry
     {
         get
         {
-            var poseText = $"{PoseLabel} ({PoseParam})";
+            var poseText = $"{PoseCatalogue.GetSavedDisplayName(PoseParam, PoseLabel)} ({PoseParam})";
             if (Math.Abs(OffsetY) > 0.001f)
                 poseText += $" Y{OffsetY:+0.00;-0.00;0.00}";
 

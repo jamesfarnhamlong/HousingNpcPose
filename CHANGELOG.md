@@ -1,14 +1,5 @@
 # Changelog
 
-## v0.3.7 Pose catalogue cleanup
-
-- Added a central pose catalogue/crosswalk for known HousingNpcPose params.
-- Replaced scattered hardcoded pose labels with catalogue lookups.
-- Added an Advanced pose catalogue table showing param, friendly name, category, safety level, aliases, and optional CSV/ActionTimeline reference notes.
-- Saved pose display now resolves friendly names from the catalogue where possible.
-- Kept custom numeric param discovery available for unknown values.
-- No changes to saved automation, visual Y offsets, nameplate hiding, or actor application logic.
-
 ## v0.3.6 User guidance polish
 
 - Added a collapsible quick-start workflow section to the main window.

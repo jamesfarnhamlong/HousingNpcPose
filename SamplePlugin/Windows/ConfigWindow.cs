@@ -24,7 +24,12 @@ public sealed class ConfigWindow : Window, IDisposable
 
     public override void Draw()
     {
-        ImGui.TextWrapped("v0.3.4. Saved local pose assignments and optional visual Y offsets can be auto-applied after entering/reloading an area. Nameplate hiding can remove labels from posed/saved NPCs. Everything is client-side only.");
+        ImGui.TextWrapped("v0.3.7. Saved local pose assignments and optional visual Y offsets can be auto-applied after entering/reloading an area. Nameplate hiding can remove labels from posed/saved NPCs. Everything is client-side only.");
+
+        ImGui.Spacing();
+        ImGui.Text("Intended workflow");
+        ImGui.Separator();
+        ImGui.TextWrapped("Place a housing NPC with the game housing tools, glamour it locally if desired, then use /hnpcpose to apply pose, visual Y offset, nameplate hiding, and saved auto-apply. This plugin does not create, move, glamour, or sync NPCs; it only adds local scene dressing on top of existing housing actors.");
 
         ImGui.Spacing();
         ImGui.Text("Automation");
