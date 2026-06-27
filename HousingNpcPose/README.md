@@ -2,7 +2,7 @@
 
 Client-side Dalamud plugin for locally posing already-spawned housing NPCs in FFXIV apartments and houses.
 
-**Stable/test checkpoint: v0.4.0 housing scene UI redesign**
+**Stable/test checkpoint: v0.4.1 scene presets**
 
 ## Purpose
 
@@ -33,6 +33,9 @@ The plugin lets existing housing NPCs hold local client-side poses, useful gestu
 7. **Save pose + Y**
    Click **Apply + save pose/Y** or **Save current pose/Y**. With auto-apply enabled, the plugin will restore the local scene after you leave and re-enter the housing area.
 
+8. **Capture a scene preset**
+   Once several NPCs are saved, use **Scene presets** to save the current room state as a named scene. Loading a scene replaces the current area saved assignments with that preset, then applies them locally.
+
 ## Recommended companion tools
 
 Housing NPC Pose works well alongside:
@@ -51,11 +54,21 @@ This plugin does not replace those tools. It only handles local pose/offset/name
 - Applies confirmed local pose params from a central catalogue/crosswalk.
 - Saves pose assignments by territory, NPC name, BaseId, and approximate position.
 - Saves and reapplies optional visual Y offsets for furniture alignment.
+- Saves and loads named room scene presets made from the current area saved pose assignments.
 - Optionally hides nameplates for posed/saved NPCs.
 - Auto-applies saved poses after leaving/re-entering housing, plugin load, and territory change.
 - Keeps debug object scanning and custom pose-param discovery behind advanced UI sections.
 
 
+
+## New in v0.4.1
+
+- Adds named scene presets for the current housing area.
+- A scene snapshots all current saved actor pose assignments, including pose, Y offset, matching identity/position, and enabled state.
+- Adds a Scene presets section to save current room state as a new scene, load a scene, overwrite a scene from current saved poses, rename a scene, and delete a scene.
+- Loading a scene replaces the current area saved pose assignments with the scene contents, then applies them locally.
+- Keeps random scene loading for a later pass so manual scene save/load can be tested safely first.
+- No changes to the underlying pose engine, actor matching, Y offsets, nameplate hiding, or pose catalogue.
 
 ## New in v0.4.0
 

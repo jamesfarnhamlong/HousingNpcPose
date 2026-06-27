@@ -27,6 +27,8 @@ public sealed class MainWindow : Window, IDisposable
     private string observationNotes = string.Empty;
     private int poseCategoryFilterIndex;
     private string poseSearch = string.Empty;
+    private string selectedSceneId = string.Empty;
+    private string sceneNameInput = "Scene 1";
 
     private static readonly string[] DiscoveryModes = { "InPositionLoop", "EmoteLoop" };
     private static readonly string[] DiscoveryConfidences = { "Confirmed", "Likely", "Uncertain", "Experimental", "ReferenceOnly" };
@@ -71,7 +73,7 @@ public sealed class MainWindow : Window, IDisposable
     };
 
     public MainWindow(Plugin plugin)
-        : base("Housing NPC Pose v0.4.0###HousingNpcPoseMain")
+        : base("Housing NPC Pose v0.4.1###HousingNpcPoseMain")
     {
         SizeConstraints = new WindowSizeConstraints
         {
@@ -95,6 +97,9 @@ public sealed class MainWindow : Window, IDisposable
         DrawAutomationControls();
 
         ImGui.Spacing();
+        DrawScenePresets();
+
+        ImGui.Spacing();
         DrawMainSceneEditor();
 
         ImGui.Spacing();
@@ -109,8 +114,8 @@ public sealed class MainWindow : Window, IDisposable
 
     private void DrawHeader()
     {
-        ImGui.TextUnformatted("Housing NPC Pose v0.4.0");
-        ImGui.TextWrapped("Local housing scene editor for already-spawned housing NPCs. Pick an actor, browse a pose, adjust visual Y, then save. Client-side only: no packets, spawning, server movement, hooks, or cross-client sync.");
+        ImGui.TextUnformatted("Housing NPC Pose v0.4.1");
+        ImGui.TextWrapped("Local housing scene editor for already-spawned housing NPCs. Pick an actor, browse a pose, adjust visual Y, save, then capture/load named room scenes. Client-side only: no packets, spawning, server movement, hooks, or cross-client sync.");
         ImGui.Spacing();
 
         ImGui.TextUnformatted($"Current area: {plugin.GetTerritoryLabel()}");
@@ -170,8 +175,9 @@ public sealed class MainWindow : Window, IDisposable
         var currentTerritory = Plugin.ClientState.TerritoryType;
         var totalSaved = plugin.Configuration.SavedPoses.Count;
         var currentAreaSaved = plugin.Configuration.SavedPoses.Count(entry => entry.TerritoryType == currentTerritory);
+        var currentAreaScenes = plugin.GetScenePresetsForCurrentTerritory().Count;
 
-        ImGui.TextUnformatted($"Auto apply: {(plugin.Configuration.AutoApplySavedPoses ? "ON" : "OFF")} | Nameplates: {(plugin.Configuration.HideNameplatesForPosedNpcs ? "hidden for posed/saved" : "normal")} | Saved here: {currentAreaSaved} | Total saved: {totalSaved}");
+        ImGui.TextUnformatted($"Auto apply: {(plugin.Configuration.AutoApplySavedPoses ? "ON" : "OFF")} | Nameplates: {(plugin.Configuration.HideNameplatesForPosedNpcs ? "hidden for posed/saved" : "normal")} | Saved here: {currentAreaSaved} | Scenes here: {currentAreaScenes} | Total saved: {totalSaved}");
 
         var autoApply = plugin.Configuration.AutoApplySavedPoses;
         if (ImGui.Checkbox("Auto-apply saved poses", ref autoApply))
@@ -192,6 +198,152 @@ public sealed class MainWindow : Window, IDisposable
 
         if (ImGui.SmallButton("Clear saved in this area"))
             plugin.ClearAllSavedPosesForCurrentTerritory();
+    }
+
+
+    private void DrawScenePresets()
+    {
+        ImGui.TextUnformatted("Scene presets");
+        ImGui.Separator();
+        ImGui.TextWrapped("A scene is a named snapshot of all saved actor poses/Y offsets for this room. Load replaces this area's current saved assignments with the scene contents, then applies them locally.");
+
+        var scenes = plugin.GetScenePresetsForCurrentTerritory().ToArray();
+        if (string.IsNullOrWhiteSpace(sceneNameInput))
+            sceneNameInput = $"Scene {scenes.Length + 1}";
+
+        var selectedScene = plugin.GetScenePresetById(selectedSceneId);
+        if (selectedScene == null && scenes.Length > 0)
+        {
+            selectedScene = scenes[0];
+            selectedSceneId = selectedScene.Id;
+            if (string.IsNullOrWhiteSpace(sceneNameInput) || sceneNameInput.StartsWith("Scene ", StringComparison.OrdinalIgnoreCase))
+                sceneNameInput = selectedScene.Name;
+        }
+
+        ImGui.SetNextItemWidth(260);
+        ImGui.InputText("Scene name", ref sceneNameInput, 80);
+
+        ImGui.SameLine();
+        if (ImGui.Button("Save current as new scene"))
+        {
+            var scene = plugin.SaveCurrentSavedPosesAsScene(sceneNameInput);
+            if (scene != null)
+            {
+                selectedSceneId = scene.Id;
+                sceneNameInput = scene.Name;
+                selectedScene = scene;
+            }
+        }
+
+        ImGui.SetNextItemWidth(420);
+        var preview = selectedScene == null ? "No scene selected" : selectedScene.DisplayText;
+        if (ImGui.BeginCombo("Saved scenes", preview))
+        {
+            if (scenes.Length == 0)
+            {
+                ImGui.TextDisabled("No scenes saved for this area yet.");
+            }
+            else
+            {
+                foreach (var scene in scenes)
+                {
+                    var selected = string.Equals(scene.Id, selectedSceneId, StringComparison.OrdinalIgnoreCase);
+                    if (ImGui.Selectable(scene.DisplayText, selected))
+                    {
+                        selectedSceneId = scene.Id;
+                        sceneNameInput = scene.Name;
+                        selectedScene = scene;
+                    }
+
+                    if (selected)
+                        ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        if (selectedScene == null)
+        {
+            ImGui.TextWrapped("Save some actor poses first, then use 'Save current as new scene' to capture this room state.");
+            return;
+        }
+
+        ImGui.TextUnformatted($"Selected scene: {selectedScene.Name} | {selectedScene.Poses.Count} actor(s) | Updated {FormatSceneDate(selectedScene.UpdatedAtUtc)}");
+
+        if (ImGui.Button("Load scene"))
+            plugin.LoadScenePreset(selectedScene.Id);
+
+        ImGui.SameLine();
+
+        if (ImGui.Button("Overwrite from current saved"))
+            plugin.OverwriteScenePresetFromCurrentSavedPoses(selectedScene.Id, sceneNameInput);
+
+        ImGui.SameLine();
+
+        if (ImGui.Button("Rename"))
+            plugin.RenameScenePreset(selectedScene.Id, sceneNameInput);
+
+        ImGui.SameLine();
+
+        if (ImGui.Button("Delete scene"))
+        {
+            if (plugin.DeleteScenePreset(selectedScene.Id))
+                selectedSceneId = string.Empty;
+        }
+
+        DrawScenePresetContents(selectedScene);
+    }
+
+    private void DrawScenePresetContents(ScenePresetEntry scene)
+    {
+        using var node = ImRaii.TreeNode($"Scene contents##{scene.Id}");
+        if (!node.Success)
+            return;
+
+        if (scene.Poses.Count == 0)
+        {
+            ImGui.TextDisabled("This scene has no saved actor poses.");
+            return;
+        }
+
+        var tableFlags =
+            ImGuiTableFlags.Borders |
+            ImGuiTableFlags.RowBg |
+            ImGuiTableFlags.Resizable |
+            ImGuiTableFlags.SizingFixedFit;
+
+        if (!ImGui.BeginTable($"HousingNpcPoseScenePresetTable{scene.Id}", 6, tableFlags))
+            return;
+
+        ImGui.TableSetupColumn("NPC");
+        ImGui.TableSetupColumn("Pose");
+        ImGui.TableSetupColumn("Y");
+        ImGui.TableSetupColumn("Position");
+        ImGui.TableSetupColumn("BaseId");
+        ImGui.TableSetupColumn("Enabled");
+        ImGui.TableHeadersRow();
+
+        foreach (var pose in scene.Poses
+            .OrderBy(pose => pose.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(pose => pose.PositionX)
+            .ThenBy(pose => pose.PositionZ))
+        {
+            ImGui.TableNextRow();
+            TableText(string.IsNullOrWhiteSpace(pose.Name) ? "<no name>" : pose.Name);
+            TableText($"{PoseCatalogue.GetSavedDisplayName(pose.PoseParam, pose.PoseLabel)} ({pose.PoseParam})");
+            TableText(pose.OffsetY.ToString("+0.00;-0.00;0.00"));
+            TableText($"{pose.PositionX:0.00}, {pose.PositionY:0.00}, {pose.PositionZ:0.00}");
+            TableText(pose.BaseId.ToString());
+            TableText(pose.Enabled ? "Yes" : "No");
+        }
+
+        ImGui.EndTable();
+    }
+
+    private static string FormatSceneDate(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "unknown" : value;
     }
 
     private void DrawMainSceneEditor()

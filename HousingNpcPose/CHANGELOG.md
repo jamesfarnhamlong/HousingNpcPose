@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.1 Scene presets
+
+- Added named scene presets for the current housing area.
+- A scene snapshots all current saved actor pose assignments, including pose param, label, matching identity/position, enabled state, and visual Y offset.
+- Added a Scene presets section to the main window.
+- Added actions to save current saved poses as a new scene, load a selected scene, overwrite a selected scene from the current saved state, rename a scene, and delete a scene.
+- Loading a scene replaces the current area's saved assignments with that scene, then applies them locally.
+- Kept random scene loading for a later pass so manual scene save/load can be tested first.
+- No changes to the underlying pose application method, actor matching, Y offset application, nameplate hiding, or pose catalogue.
+
 ## v0.4.0 Housing scene UI redesign
 
 - Reworked the main window into a more human-friendly actor → pose → Y offset → save workflow.

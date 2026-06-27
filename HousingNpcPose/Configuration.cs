@@ -7,7 +7,7 @@ namespace HousingNpcPose;
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 10;
+    public int Version { get; set; } = 11;
 
     /// <summary>
     /// Discovery mode. When enabled, the scanner lists every non-player object rather than only likely NPC candidates.
@@ -70,6 +70,12 @@ public class Configuration : IPluginConfiguration
     /// </summary>
     public List<PoseObservationEntry> PoseObservations { get; set; } = new();
 
+    /// <summary>
+    /// Named room scene presets. Each scene is a snapshot of saved pose assignments for one territory.
+    /// Loading a scene replaces the current territory's saved assignments with the scene contents, then applies them locally.
+    /// </summary>
+    public List<ScenePresetEntry> ScenePresets { get; set; } = new();
+
     public void Save()
     {
         Plugin.PluginInterface.SavePluginConfig(this);
@@ -126,3 +132,25 @@ public class PoseObservationEntry
     public string DisplayName => string.IsNullOrWhiteSpace(ObservedName) ? $"{Mode} {Param}" : ObservedName;
 }
 
+
+
+[Serializable]
+public class ScenePresetEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "New Scene";
+    public uint TerritoryType { get; set; }
+    public string TerritoryLabel { get; set; } = string.Empty;
+    public string CreatedAtUtc { get; set; } = string.Empty;
+    public string UpdatedAtUtc { get; set; } = string.Empty;
+    public List<SavedPoseEntry> Poses { get; set; } = new();
+
+    public string DisplayText
+    {
+        get
+        {
+            var countText = Poses.Count == 1 ? "1 actor" : $"{Poses.Count} actors";
+            return $"{Name} — {countText}";
+        }
+    }
+}

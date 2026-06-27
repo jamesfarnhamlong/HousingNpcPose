@@ -82,7 +82,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
         ScheduleAutoApply("plugin load");
 
-        Log.Information("HousingNpcPose loaded. v0.4.0 housing scene UI.");
+        Log.Information("HousingNpcPose loaded. v0.4.1 scene presets.");
     }
 
     public void Dispose()
@@ -341,7 +341,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
         LastScanTime = DateTime.Now;
 
         ChatGui.Print(
-            $"Scanned {ScanResults.Count} object(s) in {GetTerritoryLabel()}. v0.3.10 expanded catalogue",
+            $"Scanned {ScanResults.Count} object(s) in {GetTerritoryLabel()}. v0.4.1 scene presets",
             "HNpcPose");
     }
 
@@ -744,6 +744,197 @@ public sealed unsafe class Plugin : IDalamudPlugin
         ScanObjects();
     }
 
+
+
+    public IReadOnlyList<ScenePresetEntry> GetScenePresetsForCurrentTerritory()
+    {
+        var territory = ClientState.TerritoryType;
+        return (Configuration.ScenePresets ??= new List<ScenePresetEntry>())
+            .Where(scene => scene.TerritoryType == territory)
+            .OrderBy(scene => scene.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(scene => scene.UpdatedAtUtc, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public ScenePresetEntry? GetScenePresetById(string sceneId)
+    {
+        if (string.IsNullOrWhiteSpace(sceneId))
+            return null;
+
+        return (Configuration.ScenePresets ??= new List<ScenePresetEntry>())
+            .FirstOrDefault(scene => string.Equals(scene.Id, sceneId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public ScenePresetEntry? SaveCurrentSavedPosesAsScene(string name)
+    {
+        var currentSaved = GetCurrentTerritorySavedPoseCopies();
+        if (currentSaved.Count == 0)
+        {
+            ChatGui.PrintError("No saved poses in this area yet. Save at least one actor pose before creating a scene.", "HNpcPose");
+            return null;
+        }
+
+        var now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        var sceneName = CleanSceneName(name, (Configuration.ScenePresets?.Count ?? 0) + 1);
+        var scene = new ScenePresetEntry
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = sceneName,
+            TerritoryType = ClientState.TerritoryType,
+            TerritoryLabel = GetTerritoryLabel(),
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            Poses = currentSaved,
+        };
+
+        (Configuration.ScenePresets ??= new List<ScenePresetEntry>()).Add(scene);
+        Configuration.Save();
+        ChatGui.Print($"Saved scene '{scene.Name}' with {scene.Poses.Count} actor(s) for {scene.TerritoryLabel}.", "HNpcPose");
+        return scene;
+    }
+
+    public bool OverwriteScenePresetFromCurrentSavedPoses(string sceneId, string name)
+    {
+        var scene = GetScenePresetById(sceneId);
+        if (scene == null)
+        {
+            ChatGui.PrintError("No scene selected to overwrite.", "HNpcPose");
+            return false;
+        }
+
+        if (scene.TerritoryType != ClientState.TerritoryType)
+        {
+            ChatGui.PrintError($"Scene '{scene.Name}' belongs to {scene.TerritoryLabel}, not the current area.", "HNpcPose");
+            return false;
+        }
+
+        var currentSaved = GetCurrentTerritorySavedPoseCopies();
+        if (currentSaved.Count == 0)
+        {
+            ChatGui.PrintError("No saved poses in this area yet. Save at least one actor pose before overwriting a scene.", "HNpcPose");
+            return false;
+        }
+
+        scene.Name = CleanSceneName(name, 1, scene.Name);
+        scene.TerritoryLabel = GetTerritoryLabel();
+        scene.UpdatedAtUtc = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        scene.Poses = currentSaved;
+        Configuration.Save();
+        ChatGui.Print($"Overwrote scene '{scene.Name}' with {scene.Poses.Count} actor(s).", "HNpcPose");
+        return true;
+    }
+
+    public bool RenameScenePreset(string sceneId, string name)
+    {
+        var scene = GetScenePresetById(sceneId);
+        if (scene == null)
+        {
+            ChatGui.PrintError("No scene selected to rename.", "HNpcPose");
+            return false;
+        }
+
+        scene.Name = CleanSceneName(name, 1, scene.Name);
+        scene.UpdatedAtUtc = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        Configuration.Save();
+        ChatGui.Print($"Renamed scene to '{scene.Name}'.", "HNpcPose");
+        return true;
+    }
+
+    public bool DeleteScenePreset(string sceneId)
+    {
+        var scenes = Configuration.ScenePresets ??= new List<ScenePresetEntry>();
+        var scene = GetScenePresetById(sceneId);
+        if (scene == null)
+        {
+            ChatGui.PrintError("No scene selected to delete.", "HNpcPose");
+            return false;
+        }
+
+        var removed = scenes.RemoveAll(entry => string.Equals(entry.Id, sceneId, StringComparison.OrdinalIgnoreCase));
+        if (removed > 0)
+        {
+            Configuration.Save();
+            ChatGui.Print($"Deleted scene '{scene.Name}'.", "HNpcPose");
+            return true;
+        }
+
+        ChatGui.PrintError($"Could not delete scene '{scene.Name}'.", "HNpcPose");
+        return false;
+    }
+
+    public bool LoadScenePreset(string sceneId)
+    {
+        var scene = GetScenePresetById(sceneId);
+        if (scene == null)
+        {
+            ChatGui.PrintError("No scene selected to load.", "HNpcPose");
+            return false;
+        }
+
+        if (scene.TerritoryType != ClientState.TerritoryType)
+        {
+            ChatGui.PrintError($"Scene '{scene.Name}' belongs to {scene.TerritoryLabel}, not the current area.", "HNpcPose");
+            return false;
+        }
+
+        Configuration.SavedPoses.RemoveAll(entry => entry.TerritoryType == ClientState.TerritoryType);
+        foreach (var pose in scene.Poses.Select(CloneSavedPoseEntry))
+        {
+            pose.TerritoryType = ClientState.TerritoryType;
+            pose.TerritoryLabel = GetTerritoryLabel();
+            Configuration.SavedPoses.Add(pose);
+        }
+
+        Configuration.Save();
+        ChatGui.Print($"Loaded scene '{scene.Name}' with {scene.Poses.Count} saved actor pose(s). Applying now...", "HNpcPose");
+        ApplySavedPosesNow();
+        if (Configuration.HideNameplatesForPosedNpcs)
+            NamePlateGui.RequestRedraw();
+        return true;
+    }
+
+    private List<SavedPoseEntry> GetCurrentTerritorySavedPoseCopies()
+    {
+        var currentTerritory = ClientState.TerritoryType;
+        return Configuration.SavedPoses
+            .Where(entry => entry.TerritoryType == currentTerritory)
+            .OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(entry => entry.PositionX)
+            .ThenBy(entry => entry.PositionY)
+            .ThenBy(entry => entry.PositionZ)
+            .Select(CloneSavedPoseEntry)
+            .ToList();
+    }
+
+    private static SavedPoseEntry CloneSavedPoseEntry(SavedPoseEntry source)
+    {
+        return new SavedPoseEntry
+        {
+            Enabled = source.Enabled,
+            TerritoryType = source.TerritoryType,
+            TerritoryLabel = source.TerritoryLabel ?? string.Empty,
+            Name = source.Name ?? string.Empty,
+            BaseId = source.BaseId,
+            PositionX = source.PositionX,
+            PositionY = source.PositionY,
+            PositionZ = source.PositionZ,
+            PoseLabel = source.PoseLabel ?? string.Empty,
+            PoseParam = source.PoseParam,
+            OffsetY = source.OffsetY,
+        };
+    }
+
+    private static string CleanSceneName(string name, int fallbackNumber, string? existingName = null)
+    {
+        var cleaned = (name ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(cleaned))
+            return cleaned.Length <= 80 ? cleaned : cleaned[..80];
+
+        if (!string.IsNullOrWhiteSpace(existingName))
+            return existingName!;
+
+        return $"Scene {fallbackNumber}";
+    }
 
     public void SavePoseObservation(byte param, string mode, string observedName, string category, string confidence, string notes, string targetName, uint targetBaseId)
     {
@@ -1519,7 +1710,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
     private static void PrintHelp()
     {
-        ChatGui.Print("HousingNpcPose v0.3.10 commands:", "HNpcPose");
+        ChatGui.Print("HousingNpcPose v0.4.1 commands:", "HNpcPose");
         ChatGui.Print("/hnpcpose - open/close scanner window", "HNpcPose");
         ChatGui.Print("/hnpcpose scan - scan visible NPC candidates", "HNpcPose");
         ChatGui.Print("/hnpcpose clear - clear the current scan results", "HNpcPose");
