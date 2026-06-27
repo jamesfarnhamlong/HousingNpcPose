@@ -1,0 +1,14 @@
+{
+  "Author": "James",
+  "Name": "Housing NPC Pose",
+  "Punchline": "Client-side housing NPC pose automation with visual Y offsets and nameplate hiding.",
+  "Description": "v0.4.0 housing scene UI build. Redesigns the main window around a human-friendly actor dropdown, searchable pose browser, category filters, quick scene poses, and slider-based visual Y offset controls while keeping the stable client-side pose/Y/nameplate/auto-apply system unchanged. Lists visible housing NPC/object candidates, blocks known non-humanoid creature NPCs, saves local pose assignments plus optional visual Y offsets, reconciles known pose params against CSV emote/action metadata, and keeps discovery tools under Advanced. Client-side only: no packets, spawning, server-side movement, hooks, or effects on other clients.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "housing",
+    "npc",
+    "pose",
+    "automation",
+    "local"
+  ]
+}

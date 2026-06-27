@@ -2,7 +2,7 @@
 
 Client-side Dalamud plugin for locally posing already-spawned housing NPCs in FFXIV apartments and houses.
 
-**Stable/test checkpoint: v0.3.7 pose catalogue cleanup**
+**Stable/test checkpoint: v0.4.0 housing scene UI redesign**
 
 ## Purpose
 
@@ -22,16 +22,16 @@ The plugin lets existing housing NPCs hold local client-side poses, useful gestu
    Place the NPC near a bed, bath, counter, chair, bench, table, or scene area using the game housing tools.
 
 4. **Pose the NPC**
-   Open `/hnpcpose`, scan the room, click **Edit** on the NPC, then choose a pose such as Sit, Chair Sit, Doze, Lean, Confirm, Scheme, Reprimand, Sweat, or Shiver.
+   Open `/hnpcpose`, scan the room, choose the NPC from the **Actor** dropdown, then use the searchable **Pose browser** or quick scene-pose buttons to apply a pose such as Sit, Chair Sit, Doze, Lean, Study, Savour Tea, Guard, Scheme, or Reprimand.
 
 5. **Adjust visual Y offset**
-   Use the Y offset controls to align sitting/lying poses with furniture or raised surfaces. The offset is visual/client-side only.
+   Use the Y offset slider and nudge buttons to align sitting/lying poses with furniture or raised surfaces. The offset is visual/client-side only.
 
 6. **Hide nameplates if needed**
    Enable nameplate hiding if the NPC nameplate covers a vertically offset character.
 
 7. **Save pose + Y**
-   Click **Save selected pose + Y**. With auto-apply enabled, the plugin will restore the local scene after you leave and re-enter the housing area.
+   Click **Apply + save pose/Y** or **Save current pose/Y**. With auto-apply enabled, the plugin will restore the local scene after you leave and re-enter the housing area.
 
 ## Recommended companion tools
 
@@ -48,12 +48,49 @@ This plugin does not replace those tools. It only handles local pose/offset/name
 - Scans visible housing NPCs and pose candidates.
 - Detects housing `EventNpc` actors.
 - Blocks known non-humanoid / creature NPCs such as Namazu Mender.
-- Applies confirmed local pose params.
+- Applies confirmed local pose params from a central catalogue/crosswalk.
 - Saves pose assignments by territory, NPC name, BaseId, and approximate position.
 - Saves and reapplies optional visual Y offsets for furniture alignment.
 - Optionally hides nameplates for posed/saved NPCs.
 - Auto-applies saved poses after leaving/re-entering housing, plugin load, and territory change.
 - Keeps debug object scanning and custom pose-param discovery behind advanced UI sections.
+
+
+
+## New in v0.4.0
+
+- Redesigns the main window around a friendlier scene-editing workflow.
+- Adds an actor dropdown so normal use no longer requires typing object indices.
+- Adds a searchable pose browser with category filters and per-row Apply / Apply + save buttons.
+- Adds quick scene-pose buttons for common housing uses such as chair sit, doze, lean, study, tea, guard, slump, scheme, and reprimand.
+- Reworks visual Y offset into a slider plus precise nudge buttons.
+- Moves the raw object table, manual index tools, and discovery logger further into Advanced so normal posing is less cluttered.
+- Keeps the existing stable pose application, saved automation, Y offset, nameplate hiding, and catalogue data unchanged.
+
+## New in v0.3.10
+
+- Expands the built-in pose catalogue using live-tested InPositionLoop observations from params 1-100.
+- Adds clearer categories: Core, Gesture, Dance, Exercise, Performance, Prop, Experimental, and Unknown.
+- Keeps the CSV fields as crosswalk metadata only; the small HousingNpcPose param remains the source of truth.
+- Documents that standard General emotes such as /bow, /welcome, and /wave are not currently exposed through the small param route used by this plugin.
+- Cleans the project file name from `HousingNpcPose.csproj` to `HousingNpcPose.csproj`.
+
+## New in v0.3.9
+
+- Added an Advanced pose discovery logger for mapping what params 0-255 visibly do.
+- Added Previous / Current / Next buttons for stepping through params on a selected safe NPC.
+- Added observation fields for name, category, confidence, and notes.
+- Saves local tester observations into plugin configuration.
+- Added an observation table and CSV copy/export button so results can be reconciled with the uploaded emote/action CSVs later.
+- No changes to the core actor-pose, saved pose, Y offset, nameplate, or auto-apply logic.
+
+## New in v0.3.8
+
+- Reworked the pose catalogue into an explicit crosswalk between live-tested HousingNpcPose params and CSV emote/action metadata.
+- Added confidence levels so confirmed live params are separated from likely/uncertain/experimental entries.
+- Added observed behaviour, CSV section, CSV row/ordinal, CSV ID, emote_start, optional ActionTimeline hints, and notes.
+- Updated the Advanced catalogue table to make the distinction clear: the small HousingNpcPose param is still the value applied by this plugin; CSV IDs are reference metadata only.
+- No behavioural changes to saved poses, Y offsets, nameplate hiding, or auto-apply.
 
 ## New in v0.3.7
 
@@ -96,6 +133,7 @@ It does not:
 /hnpcpose nameplates off
 /hnpcpose restore all
 /hnpcpose poses
+# Advanced UI: pose discovery logger for recording 0-255 behaviour
 /hnpcpose offset <idx> <y>
 /hnpcpose saveoffset <idx> <y>
 ```
@@ -119,6 +157,8 @@ Core/useful confirmed entries:
 ```
 
 Additional discovered entries, such as Step Dance, Harvest Dance, Ball Dance, Manderville Dance, Wasshoi, Lali-hop, Hildibrand/Omega-style animations, and unknown dance slots, are kept in the Advanced catalogue/discovery area rather than promoted as core scene poses.
+
+The v0.3.9 discovery logger is for testing the remaining 0-255 values in a controlled way. Observations are saved as local notes first, then useful entries can be promoted into the built-in catalogue after verification.
 
 ## Known limitations
 

@@ -24,7 +24,7 @@ public sealed class ConfigWindow : Window, IDisposable
 
     public override void Draw()
     {
-        ImGui.TextWrapped("v0.3.7. Saved local pose assignments and optional visual Y offsets can be auto-applied after entering/reloading an area. Nameplate hiding can remove labels from posed/saved NPCs. Everything is client-side only.");
+        ImGui.TextWrapped("v0.3.10. Saved local pose assignments and optional visual Y offsets can be auto-applied after entering/reloading an area. Nameplate hiding can remove labels from posed/saved NPCs. Everything is client-side only.");
 
         ImGui.Spacing();
         ImGui.Text("Intended workflow");
@@ -34,7 +34,7 @@ public sealed class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
         ImGui.Text("Automation");
         ImGui.Separator();
-        ImGui.TextUnformatted($"Saved pose entries: {configuration.SavedPoses.Count}");
+        ImGui.TextUnformatted($"Saved pose entries: {configuration.SavedPoses.Count} | Discovery observations: {configuration.PoseObservations?.Count ?? 0}");
 
         var autoApply = configuration.AutoApplySavedPoses;
         if (ImGui.Checkbox("Auto-apply saved poses after zoning/plugin load", ref autoApply))

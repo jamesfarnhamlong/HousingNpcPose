@@ -7,7 +7,7 @@ namespace HousingNpcPose;
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 7;
+    public int Version { get; set; } = 10;
 
     /// <summary>
     /// Discovery mode. When enabled, the scanner lists every non-player object rather than only likely NPC candidates.
@@ -64,6 +64,12 @@ public class Configuration : IPluginConfiguration
     /// </summary>
     public List<SavedPoseEntry> SavedPoses { get; set; } = new();
 
+    /// <summary>
+    /// Local discovery notes for mapping 0-255 pose params to observed behaviour.
+    /// These are user/tester notes only; they do not affect actor application unless promoted into PoseCatalogue.cs later.
+    /// </summary>
+    public List<PoseObservationEntry> PoseObservations { get; set; } = new();
+
     public void Save()
     {
         Plugin.PluginInterface.SavePluginConfig(this);
@@ -101,3 +107,22 @@ public class SavedPoseEntry
         }
     }
 }
+
+[Serializable]
+public class PoseObservationEntry
+{
+    public string Mode { get; set; } = "InPositionLoop";
+    public byte Param { get; set; }
+    public string ObservedName { get; set; } = string.Empty;
+    public string Category { get; set; } = "Unknown";
+    public string Confidence { get; set; } = "Uncertain";
+    public string Notes { get; set; } = string.Empty;
+    public uint TerritoryType { get; set; }
+    public string TerritoryLabel { get; set; } = string.Empty;
+    public string TargetName { get; set; } = string.Empty;
+    public uint TargetBaseId { get; set; }
+    public string UpdatedAtUtc { get; set; } = string.Empty;
+
+    public string DisplayName => string.IsNullOrWhiteSpace(ObservedName) ? $"{Mode} {Param}" : ObservedName;
+}
+

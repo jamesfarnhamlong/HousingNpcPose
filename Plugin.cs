@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.Gui.NamePlate;
 using Dalamud.Game.ClientState.Objects.Types;
@@ -81,7 +82,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
 
         ScheduleAutoApply("plugin load");
 
-        Log.Information("HousingNpcPose loaded. v0.3.7 pose catalogue cleanup.");
+        Log.Information("HousingNpcPose loaded. v0.4.0 housing scene UI.");
     }
 
     public void Dispose()
@@ -340,7 +341,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
         LastScanTime = DateTime.Now;
 
         ChatGui.Print(
-            $"Scanned {ScanResults.Count} object(s) in {GetTerritoryLabel()}. v0.3.7 pose catalogue cleanup",
+            $"Scanned {ScanResults.Count} object(s) in {GetTerritoryLabel()}. v0.3.10 expanded catalogue",
             "HNpcPose");
     }
 
@@ -741,6 +742,110 @@ public sealed unsafe class Plugin : IDalamudPlugin
             NamePlateGui.RequestRedraw();
         ChatGui.Print($"Cleared {removed} saved pose entry/entries for {GetTerritoryLabel()}.", "HNpcPose");
         ScanObjects();
+    }
+
+
+    public void SavePoseObservation(byte param, string mode, string observedName, string category, string confidence, string notes, string targetName, uint targetBaseId)
+    {
+        var normalizedMode = NormalizeObservationMode(mode);
+        var observations = Configuration.PoseObservations ??= new List<PoseObservationEntry>();
+        var existing = observations.FirstOrDefault(entry => entry.Param == param && string.Equals(entry.Mode, normalizedMode, StringComparison.OrdinalIgnoreCase));
+
+        if (existing == null)
+        {
+            existing = new PoseObservationEntry
+            {
+                Mode = normalizedMode,
+                Param = param,
+            };
+            observations.Add(existing);
+        }
+
+        existing.ObservedName = string.IsNullOrWhiteSpace(observedName) ? $"{normalizedMode} {param}" : observedName.Trim();
+        existing.Category = string.IsNullOrWhiteSpace(category) ? "Unknown" : category.Trim();
+        existing.Confidence = string.IsNullOrWhiteSpace(confidence) ? "Uncertain" : confidence.Trim();
+        existing.Notes = notes?.Trim() ?? string.Empty;
+        existing.TerritoryType = ClientState.TerritoryType;
+        existing.TerritoryLabel = GetTerritoryLabel();
+        existing.TargetName = string.IsNullOrWhiteSpace(targetName) ? "<unknown>" : targetName.Trim();
+        existing.TargetBaseId = targetBaseId;
+        existing.UpdatedAtUtc = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+        Configuration.Save();
+        ChatGui.Print($"Saved observation: {existing.Mode} {existing.Param} = {existing.DisplayName} [{existing.Confidence}; {existing.Category}].", "HNpcPose");
+    }
+
+    public bool DeletePoseObservation(byte param, string mode)
+    {
+        var normalizedMode = NormalizeObservationMode(mode);
+        var observations = Configuration.PoseObservations ??= new List<PoseObservationEntry>();
+        var removed = observations.RemoveAll(entry => entry.Param == param && string.Equals(entry.Mode, normalizedMode, StringComparison.OrdinalIgnoreCase));
+        if (removed > 0)
+            Configuration.Save();
+
+        ChatGui.Print(removed > 0
+            ? $"Deleted observation for {normalizedMode} {param}."
+            : $"No observation found for {normalizedMode} {param}.", "HNpcPose");
+        return removed > 0;
+    }
+
+    public string ExportPoseObservationsCsv()
+    {
+        var observations = Configuration.PoseObservations ?? new List<PoseObservationEntry>();
+        var builder = new StringBuilder();
+        builder.AppendLine("Mode,Param,ObservedName,Category,Confidence,Notes,TerritoryType,TerritoryLabel,TargetName,TargetBaseId,UpdatedAtUtc,BuiltInCatalogueName,BuiltInConfidence,BuiltInCsv");
+
+        foreach (var entry in observations
+            .OrderBy(entry => entry.Mode, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(entry => entry.Param))
+        {
+            PoseCatalogue.TryGetByParam(entry.Param, out var builtIn);
+            builder.Append(Csv(entry.Mode));
+            builder.Append(',');
+            builder.Append(entry.Param.ToString(CultureInfo.InvariantCulture));
+            builder.Append(',');
+            builder.Append(Csv(entry.ObservedName));
+            builder.Append(',');
+            builder.Append(Csv(entry.Category));
+            builder.Append(',');
+            builder.Append(Csv(entry.Confidence));
+            builder.Append(',');
+            builder.Append(Csv(entry.Notes));
+            builder.Append(',');
+            builder.Append(entry.TerritoryType.ToString(CultureInfo.InvariantCulture));
+            builder.Append(',');
+            builder.Append(Csv(entry.TerritoryLabel));
+            builder.Append(',');
+            builder.Append(Csv(entry.TargetName));
+            builder.Append(',');
+            builder.Append(entry.TargetBaseId.ToString(CultureInfo.InvariantCulture));
+            builder.Append(',');
+            builder.Append(Csv(entry.UpdatedAtUtc));
+            builder.Append(',');
+            builder.Append(Csv(builtIn?.DisplayName ?? string.Empty));
+            builder.Append(',');
+            builder.Append(Csv(builtIn?.Confidence.ToString() ?? string.Empty));
+            builder.Append(',');
+            builder.Append(Csv(builtIn?.CsvText ?? string.Empty));
+            builder.AppendLine();
+        }
+
+        return builder.ToString();
+    }
+
+    private static string NormalizeObservationMode(string mode)
+    {
+        if (string.Equals(mode, "loop", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "emoteloop", StringComparison.OrdinalIgnoreCase))
+            return "EmoteLoop";
+
+        return "InPositionLoop";
+    }
+
+    private static string Csv(string value)
+    {
+        value ??= string.Empty;
+        return $"\"{value.Replace("\"", "\"\"")}\"";
     }
 
     public SavedPoseEntry? FindSavedPoseForScanResult(NpcScanResult result)
@@ -1404,16 +1509,17 @@ public sealed unsafe class Plugin : IDalamudPlugin
     private static void PrintPoseCatalogue()
     {
         var lines = PoseCatalogue.All
-            .OrderBy(definition => definition.Category)
+            .OrderBy(definition => definition.Confidence)
+            .ThenBy(definition => definition.Category)
             .ThenBy(definition => definition.Param)
-            .Select(definition => $"{definition.Param}: {definition.DisplayName} [{definition.Category}; {definition.Safety}]");
+            .Select(definition => $"{definition.Param}: {definition.DisplayName} [{definition.Confidence}; {definition.Category}; {definition.CsvText}]");
 
-        ChatGui.Print("Known pose catalogue: " + string.Join(" | ", lines), "HNpcPose");
+        ChatGui.Print("Known pose catalogue/crosswalk: " + string.Join(" | ", lines), "HNpcPose");
     }
 
     private static void PrintHelp()
     {
-        ChatGui.Print("HousingNpcPose v0.3.7 commands:", "HNpcPose");
+        ChatGui.Print("HousingNpcPose v0.3.10 commands:", "HNpcPose");
         ChatGui.Print("/hnpcpose - open/close scanner window", "HNpcPose");
         ChatGui.Print("/hnpcpose scan - scan visible NPC candidates", "HNpcPose");
         ChatGui.Print("/hnpcpose clear - clear the current scan results", "HNpcPose");
@@ -1426,6 +1532,7 @@ public sealed unsafe class Plugin : IDalamudPlugin
         ChatGui.Print("/hnpcpose pos <idx> <param> - apply CharacterModes.InPositionLoop with param 0-255", "HNpcPose");
         ChatGui.Print("/hnpcpose loop <idx> <param> - apply CharacterModes.EmoteLoop with param 0-255", "HNpcPose");
         ChatGui.Print("/hnpcpose mode <idx> <pos|loop|normal> <param> - pose discovery command", "HNpcPose");
+        ChatGui.Print("Advanced UI includes a discovery logger for recording what params 0-255 visibly do.", "HNpcPose");
         ChatGui.Print("/hnpcpose normal <idx> - force CharacterModes.Normal param 0", "HNpcPose");
         ChatGui.Print("/hnpcpose restore <idx|all> - restore original mode snapshot(s)", "HNpcPose");
         ChatGui.Print("/hnpcpose save <idx> <poseName|param> [yOffset] - save a local pose and optional visual Y offset", "HNpcPose");
